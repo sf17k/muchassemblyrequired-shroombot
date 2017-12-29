@@ -233,10 +233,8 @@ marquee:
     mov a, HOLO_DISPLAY_HEX
     hwi HW_HOLO
     
-    mov a, d ; restore a to numValues TODO replace with 'ret d'
-    
     pop bp
-    ret
+    ret d ; pop args
 
 
 
@@ -845,7 +843,6 @@ _showTestResults:
     push [testActualY]
     mov a, 9 ; numValues
     call marquee
-    add sp, a ; pop values TODO
     
     jmp _showTestResults_end
     
@@ -855,7 +852,6 @@ _showTestResults_success:
     push [testNumPassed]
     mov a, 2 ; numValues
     call marquee
-    add sp, a ; pop values TODO
     
 _showTestResults_end:
     ret
