@@ -1,0 +1,592 @@
+; collector bot
+; it gathers things
+
+; todo
+; - locate resource
+; - move to resource
+; - harvest resource
+; - bring resource to cache
+; - deposit resource at cache
+
+FALSE equ 0x0000 ; must be 0x0000
+TRUE equ 0xffff ; must be 0xffff
+
+DIR_N equ 0
+DIR_E equ 1
+DIR_S equ 2
+DIR_W equ 3
+
+HW_LEGS equ 0x0001
+HW_LIDAR equ 0x0003
+HW_RNG equ 0x0007
+HW_CLOCK equ 0x0008
+HW_HOLO equ 0x0009
+HW_BATTERY equ 0x000a
+
+BATTERY_GET_CHARGE equ 1
+BATTERY_GET_CAPACITY equ 2
+
+LEGS_TURN equ 1 ; 20 kJ
+LEGS_WALK equ 2 ; 100 kJ
+
+LIDAR_GET_POS equ 1
+LIDAR_GET_PATH equ 2 ; 50 kJ
+LIDAR_GET_MAP equ 3 ; 10 kJ
+LIDAR_GET_WORLD_POS equ 4
+
+LIDAR_PATH_ADDR equ 0x0000
+LIDAR_MAP_ADDR equ 0x0100
+
+MAP_SIZE equ 0x0100 ; 16x16
+
+; used by updateMapPeriodically
+MAP_UPDATE_INTERVAL equ 40 ; ticks
+MAP_UPDATE_INTERVAL_MOVING equ 2 ; ticks, for moving targets
+
+; bits
+MAP_WALL equ 0x8000
+MAP_BIOMASS equ 0x4000
+MAP_IRON equ 0x0200
+MAP_COPPER equ 0x0100
+MAP_CUBOT equ 0x0080
+
+
+
+; memory layout:
+; 0x0000 lidar path
+; 0x0100 lidar map
+; 0x0200 code (.data and .text)
+
+.data
+
+debugValue: dw 0xDEAD ; printed value
+isStopped: dw FALSE ; disable further commands?
+stepN_stepsLeft: dw -1 ; -1 means no stepN command started yet
+moveTo_pathPtr: dw -1 ; -1 means not started
+facingDir: dw -1 ; -1 means don't know yet
+
+didMapUpdateThisTick: dw FALSE
+lastTargetX: dw -1
+lastTargetY: dw -1
+isTargetMoving: dw FALSE
+
+
+
+; entry point
+
+.text
+
+    ;brk
+    
+    
+    ; commands
+    
+    call updateMapPeriodically
+    mov a, MAP_BIOMASS
+    call searchMap ; position or (-1,-1) in x,y
+    call updateTarget
+    
+    ; show target x,y
+    mov [debugValue], x
+    shl [debugValue], 8
+    or [debugValue], y
+    
+    mov a, 1 ; distance
+    call moveTo
+    ;mov [isStopped], FALSE ; reset
+    
+    ; if battery full, take a step
+    call usedCharge ; in b
+    cmp b, 0
+    jnz entry_endif
+    mov a, LEGS_WALK ; walk
+    mov b, [facingDir]
+    hwi HW_LEGS
+    
+entry_endif:
+    
+    ; debug printing
+    
+    call displayDebugValues
+    
+    brk
+
+
+
+; displayDebugValues()
+
+; TODO function to add a value to an array
+
+displayDebugValues:
+    push bp
+    mov bp, sp
+    
+    ; print marker
+    ;push 0xC0DE ; marker
+    
+    ; print values
+    push [debugValue]
+    
+    ; print battery charge used
+    call usedCharge
+    push b
+    
+    
+    ; numberOfValues = bp - sp
+    mov a, bp
+    sub a, sp
+    
+    call marquee
+    add sp, a ; pop values TODO
+    
+    pop bp
+    ret
+
+
+
+; marquee(value...)
+; in a: numberOfValues
+
+; Show values in sequence using hologram.
+; Changing numberOfValues will throw off the sequence.
+
+marquee:
+    push bp
+    mov bp, sp
+    
+    mov d, a ; numberOfValues
+    
+    ; calculate index
+    hwi HW_CLOCK ; clock in b:c
+    mov y, b ; copy to y:a
+    mov a, c
+    div d ; index in y = clock % numberOfValues
+    
+    ; show indexed value
+    mov b, d ; numberOfValues
+    sub b, y ; - index (cuz upside down stack)
+    add b, bp ; + bp
+    mov a, [b+1] ; + arg offset of 2 - 1 = &value
+    hwi HW_HOLO
+    
+    mov a, d ; restore a to numberOfValues TODO replace with 'ret d'
+    
+    pop bp
+    ret
+
+
+
+; usedCharge()
+; out b: capacity - charge
+
+usedCharge:
+    mov a, BATTERY_GET_CHARGE
+    hwi HW_BATTERY
+    mov c, b
+    mov a, BATTERY_GET_CAPACITY
+    hwi HW_BATTERY
+    sub b, c
+    ret
+
+
+
+; reset()
+
+; Reallows movement and breaks the program.
+; Intended for clearing manual commands.
+; (But you can just reupload the code.)
+
+reset:
+    mov [isStopped], FALSE
+    brk
+
+
+
+; stepOnce()
+; in b: direction
+
+; Manual command to take one step.
+
+stepOnce:
+    cmp [isStopped], TRUE ; if isStopped, exit
+    jz stepOnce_end
+    
+    mov a, LEGS_WALK
+    hwi HW_LEGS ; direction already in b
+    
+    mov [isStopped], TRUE ; prevent walking again
+    
+stepOnce_end:
+    ret
+
+
+
+; stepN()
+; in a: numSteps
+; in b: direction
+
+; Manual command to take multiple steps in one direction.
+
+stepN:
+    cmp [isStopped], TRUE ; if isStopped, exit
+    jz stepN_end
+    
+    mov d, a ; numSteps
+    
+    ; take step
+    mov a, LEGS_WALK
+    hwi HW_LEGS ; direction already in b
+    
+    ; if stepsLeft not set, set it
+    cmp [stepN_stepsLeft], 0
+    jge stepN_endif
+    mov [stepN_stepsLeft], d ; numSteps
+    
+stepN_endif:
+    ; decrement stepsLeft
+    sub [stepN_stepsLeft], 1
+    
+    ; halt if finished
+    cmp [stepN_stepsLeft], 0
+    jg stepN_end
+    mov [isStopped], TRUE
+    
+stepN_end:
+    ret
+
+
+
+; faceToward()
+; in x,y: target
+
+; Costs 20 kJ if need to turn.
+
+faceToward:
+
+    ; put offset from own pos in c,d
+    mov c, x ; copy
+    mov d, y
+    mov a, LIDAR_GET_POS
+    hwi HW_LIDAR
+    sub c, x ; get offset
+    sub d, y
+    
+    ; put absolute value of offset coords in x,y
+    mov x, c ; copy x
+    mov a, x ; abs
+    sar a, 15
+    xor x, a
+    sub x, a
+    mov y, d ; copy y
+    mov a, y ; abs
+    sar a, 15
+    xor y, a
+    sub y, a
+    
+    ; pick larger dimension
+    cmp x, y ; if abs(x) > abs(y), face a horizontal direction, else vertical
+    jl faceToward_vertical
+
+faceToward_horizontal:
+    mov b, DIR_E ; face east if positive x
+    cmp c, 0 ; if negative x, flip to west
+    jl faceToward_flip
+    jmp faceToward_turn
+    
+faceToward_vertical:
+    mov b, DIR_N ; face north if negative y
+    cmp d, 0 ; if positive y, flip to south
+    jg faceToward_flip
+    jmp faceToward_turn
+    
+faceToward_flip:
+    add b, 2 ; flip compass direction
+    
+faceToward_turn:
+    ; don't turn if already facing
+    cmp [facingDir], b
+    jz faceToward_end
+    
+    mov a, LEGS_TURN
+    hwi HW_LEGS ; direction already in b
+    
+    mov [facingDir], b ; save direction
+    
+faceToward_end:
+    ret
+
+
+
+; moveTo()
+; in a: distance
+; in x,y: destination
+
+; Manual command to pathfind and move to destination.
+; Costs an extra 50 kJ per pathfind.
+; Will not pathfind if destination already reached or outside bounds.
+
+moveTo:
+    push a ; distance
+    
+    cmp [isStopped], TRUE ; if isStopped, exit
+    jz moveTo_end
+    
+    ; initialize
+    jmp moveTo_endif
+    
+    cmp [moveTo_pathPtr], -1 ; if already started on path, skip initialization
+    jnz moveTo_walkPath
+    
+    ; check destination is valid
+    test x, 0xfff0 ; if x or y are not in [0, 16), halt
+    jnz moveTo_halt
+    test y, 0xfff0
+    jnz moveTo_halt
+    
+    ; check we're not already at destination
+    mov c, x ; store x,y
+    mov d, y
+    mov a, LIDAR_GET_POS
+    hwi HW_LIDAR
+    
+    cmp c, x ; if position == destination, halt
+    jnz moveTo_endif
+    cmp d, y
+    jnz moveTo_endif
+    jmp moveTo_halt
+    
+    ; end initialize
+    
+moveTo_endif:
+    ; calculate path
+    mov a, LIDAR_GET_PATH ; pathfind to x,y
+    mov b, [sp+0] ; distance
+    hwi HW_LIDAR
+    
+    ; start on path
+    mov [moveTo_pathPtr], LIDAR_PATH_ADDR
+    
+moveTo_walkPath:
+    ; read step
+    mov b, [moveTo_pathPtr] ; read from path memory
+    mov b, [b]
+    cmp b, -1 ; halt if invalid
+    jz moveTo_halt
+    cmp b, 0xAAAA ; halt if reached end (marked by magic number)
+    jz moveTo_halt
+    
+    ; take step
+    mov a, LEGS_WALK
+    hwi HW_LEGS ; direction is in b
+    
+    ; advance to next step
+    add [moveTo_pathPtr], 1
+    
+    ; done
+    jmp moveTo_end
+    
+moveTo_halt:
+    ; halt
+    mov [isStopped], TRUE
+    
+moveTo_end:
+    add sp, 1 ; pop distance
+    ret
+
+
+
+; updateMapPeriodically()
+
+updateMapPeriodically:
+    mov [didMapUpdateThisTick], FALSE
+    
+    ; modulo clock for periodic updates
+    mov c, [isTargetMoving] ; if moving, use interval for moving, else the other one
+    mov d, c ; d = ~c
+    not d
+    and c, MAP_UPDATE_INTERVAL_MOVING ; d = isTargetMoving ? intervalMoving : interval
+    and d, MAP_UPDATE_INTERVAL
+    or d, c
+    
+    hwi HW_CLOCK ; time in b:c
+    mov y, b ; copy to y:a for modulo
+    mov a, c
+    div d ; clock % interval, remainder in y
+    
+    cmp y, 0 ; if remainder is 0, time to update
+    jnz updateMapPeriodically_end
+    
+    ; get map
+    mov a, LIDAR_GET_MAP
+    hwi HW_LIDAR
+    mov [didMapUpdateThisTick], TRUE
+    
+updateMapPeriodically_end:
+    ret
+
+
+
+; updateMapIfBatteryFull()
+
+; TODO change to isBatteryFull()
+
+updateMapIfBatteryFull:
+    mov a, BATTERY_GET_CHARGE
+    hwi HW_BATTERY
+    mov c, b
+    mov a, BATTERY_GET_CAPACITY
+    hwi HW_BATTERY
+    cmp c, b ; if not full, return
+    jl updateMapIfBatteryFull_end
+    
+    ; get map
+    mov a, LIDAR_GET_MAP
+    hwi HW_LIDAR
+    
+updateMapIfBatteryFull_end:
+    ret
+
+
+
+; searchMap()
+; in a: item to search for
+; out x,y: position or (-1,-1)
+
+; Searches the map that's in memory, so make sure it's up to date.
+; Ignores own position.
+
+searchMap:
+    push a ; item
+    
+    ; index of own position, so we can skip it
+    ; (in case we're searching for cubots)
+    mov a, LIDAR_GET_POS
+    hwi HW_LIDAR
+    call mapXYToIndex
+    mov b, a ; ownIndex
+    add b, LIDAR_MAP_ADDR
+    
+    ; search map for item
+    pop a ; value = item
+    mov c, LIDAR_MAP_ADDR ; startAddr
+    mov d, c
+    add d, MAP_SIZE ; endAddr
+    
+searchMap_loop:
+    ; search
+    call findNext
+    
+    ; if found own position, keep searching
+    cmp c, b
+    jnz searchMap_finishedSearch
+    add c, 1 ; skip this position
+    jmp searchMap_loop
+
+searchMap_finishedSearch:
+    cmp c, d ; if not found, return (-1, -1)
+    jz searchMap_fail
+    
+    ; index = resultAddr - startAddr
+    mov a, c
+    sub a, LIDAR_MAP_ADDR
+    
+    ; return x,y
+    call mapIndexToXY
+    ret
+    
+searchMap_fail:
+    mov x, -1
+    mov y, -1
+    ret
+
+
+
+; updateTarget()
+; in x,y: newTarget
+
+; Sets lastTargetX, lastTargetY, isTargetMoving.
+
+updateTarget:
+    ; only update if map has updated
+    cmp [didMapUpdateThisTick], 0
+    jz updateTarget_end
+    
+    ; has target moved?
+    cmp [lastTargetX], x
+    jnz updateTarget_moved
+    cmp [lastTargetY], y
+    jnz updateTarget_moved
+    
+    ; not moved
+    mov [isTargetMoving], FALSE
+    ret
+    
+updateTarget_moved:
+    mov [isTargetMoving], TRUE
+    mov [lastTargetX], x
+    mov [lastTargetY], y
+    
+updateTarget_end:
+    ret
+
+
+
+; mapXYToIndex()
+; in x,y: coords
+; out a: index in [0, MAP_SIZE), i.e. a byte
+
+mapXYToIndex:
+    ; index bits are 0000 0000 yyyy xxxx
+    mov a, y
+    shl a, 4
+    or a, x
+    ret
+
+
+
+; mapIndexToXY()
+; in a: index in [0, MAP_SIZE), i.e. a byte
+; out x,y: coords
+
+mapIndexToXY:
+    ; index bits are 0000 0000 yyyy xxxx
+    mov x, a
+    and x, 0x000f
+    
+    mov y, a
+    shr y, 4
+    and y, 0x000f
+    ret
+
+
+
+; findNext()
+; in a: value
+; in c: startAddr
+; in d: endAddr
+; out c: result or endAddr
+
+; Search memory sequentially for value.
+; Return address of first occurrence, or endAddr if not found.
+; endAddr is one past last item to be searched.
+
+findNext:
+    ; start loop
+    cmp c, d ; if reached end, return
+    jge findNext_end
+    
+    cmp a, [c] ; if found value, return
+    jz findNext_end
+    
+    add c, 1 ; advance
+    jmp findNext ; loop
+    
+findNext_end:
+    ret
+
+
+
+
+
+
+
