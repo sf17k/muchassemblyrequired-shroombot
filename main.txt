@@ -23,6 +23,10 @@ HW_CLOCK equ 0x0008
 HW_HOLO equ 0x0009
 HW_BATTERY equ 0x000a
 
+HOLO_CLEAR equ 0
+HOLO_DISPLAY_HEX equ 1
+HOLO_DISPLAY_STRING equ 2
+
 BATTERY_GET_CHARGE equ 1
 BATTERY_GET_CAPACITY equ 2
 
@@ -40,8 +44,10 @@ LIDAR_MAP_ADDR equ 0x0100
 MAP_SIZE equ 0x0100 ; 16x16
 
 ; used by updateMapPeriodically
-MAP_UPDATE_INTERVAL equ 40 ; ticks
-MAP_UPDATE_INTERVAL_MOVING equ 2 ; ticks, for moving targets
+;MAP_UPDATE_INTERVAL equ 4 ; ticks
+;MAP_UPDATE_INTERVAL_MOVING equ 2 ; ticks, for moving targets
+MAP_UPDATE_INTERVAL equ 1 ; ticks
+MAP_UPDATE_INTERVAL_MOVING equ 1 ; ticks, for moving targets
 
 ; bits
 MAP_WALL equ 0x8000
@@ -55,7 +61,7 @@ MAP_CUBOT equ 0x0080
 ; memory layout:
 ; 0x0000 lidar path
 ; 0x0100 lidar map
-; 0x0200 code (.data and .text)
+; 0x0200 .data section
 
 .data
 
@@ -76,13 +82,14 @@ isTargetMoving: dw FALSE
 
 .text
 
-    ;brk
-    
+    ; cheat
+    mov a, -1
+    hwi HW_BATTERY
     
     ; commands
     
     call updateMapPeriodically
-    mov a, MAP_BIOMASS
+    mov a, MAP_CUBOT
     call searchMap ; position or (-1,-1) in x,y
     call updateTarget
     
@@ -91,9 +98,9 @@ isTargetMoving: dw FALSE
     shl [debugValue], 8
     or [debugValue], y
     
-    mov a, 1 ; distance
+    mov a, 0 ; distance, set to 0 to avoid battery usage (FIXME)
     call moveTo
-    ;mov [isStopped], FALSE ; reset
+    mov [isStopped], FALSE ; reset
     
     ; if battery full, take a step
     call usedCharge ; in b
@@ -166,7 +173,8 @@ marquee:
     mov b, d ; numberOfValues
     sub b, y ; - index (cuz upside down stack)
     add b, bp ; + bp
-    mov a, [b+1] ; + arg offset of 2 - 1 = &value
+    mov b, [b+1] ; + arg offset of 2 - 1 = &value
+    mov a, HOLO_DISPLAY_HEX
     hwi HW_HOLO
     
     mov a, d ; restore a to numberOfValues TODO replace with 'ret d'
@@ -560,6 +568,36 @@ mapIndexToXY:
 
 
 
+; findNth()
+; in a: value
+; in b: N
+; in c: startAddr
+; in d: endAddr
+; out c: result or endAddr
+
+; Search memory sequentially for Nth occurrence of value,
+; where the first occurrence is the 0th.
+; Return address of Nth occurrence, or endAddr if not found.
+; endAddr is one past last item to be searched.
+
+findNth:
+    ; start loop
+    cmp c, d ; if reached end, return
+    jge findNth_end
+    
+    call findNext ; find next occurrence
+    
+    cmp b, 0 ; if searched N times, return
+    jz findNth_end
+    
+    sub b, 1 ; advance
+    jmp findNth ; loop
+    
+findNth_end:
+    ret
+
+
+
 ; findNext()
 ; in a: value
 ; in c: startAddr
@@ -582,6 +620,36 @@ findNext:
     jmp findNext ; loop
     
 findNext_end:
+    ret
+
+
+
+; count()
+; in a: value
+; in c: startAddr
+; in d: endAddr
+; out b: count
+
+; Search memory region for value, count number of occurrences.
+; endAddr is one past last item to be searched.
+
+count:
+    mov b, 0 ; counter
+    
+count_loop:
+    ; start loop
+    cmp c, d ; if reached end, return
+    jge count_end
+    
+    cmp a, [c] ; if found value, increment counter
+    jz count_notFound
+    add b, 1
+    
+count_notFound:
+    add c, 1 ; advance
+    jmp count_loop ; loop
+    
+count_end:
     ret
 
 
