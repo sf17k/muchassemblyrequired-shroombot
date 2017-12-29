@@ -21,7 +21,7 @@ TESTING equ 1
 FALSE equ 0x0000 ; must be 0x0000
 TRUE equ 0xffff ; must be 0xffff
 
-; registers for testing
+; for testing framework
 REG_A equ 0x0001
 REG_B equ 0x0002
 REG_C equ 0x0004
@@ -114,7 +114,19 @@ runAllTests:
     
     ; --- ALL TESTS ---
 
+    mov [nextTest], count_test1
+    call runTest
+    mov [nextTest], count_test2
+    call runTest
+    mov [nextTest], count_test3
+    call runTest
+    mov [nextTest], count_test4
+    call runTest
+    mov [nextTest], count_test5
+    call runTest
     mov [nextTest], seedRng_test
+    call runTest
+    mov [nextTest], random_test
     call runTest
     
     ; ^ ADD TESTS HERE ^
@@ -674,6 +686,8 @@ findNext_end:
 ; in d: endAddr
 ; out b: count
 
+; corrupts c
+
 ; Search memory region for value, count number of occurrences.
 ; endAddr is one past last item to be searched.
 
@@ -686,15 +700,56 @@ count_loop:
     jge count_end
     
     cmp a, [c] ; if found value, increment counter
-    jz count_notFound
+    jnz count_next
     add b, 1
     
-count_notFound:
+count_next:
     add c, 1 ; advance
     jmp count_loop ; loop
     
 count_end:
     ret
+
+
+
+count_test_data: dw 55,33,11,22,33,44,44,44,44,55,33,22,55,55,55
+count_test_dataEnd: dw -1
+
+; in a: value
+count_test_helper:
+    ; startAddr
+    mov c, count_test_data
+    ; endAddr
+    mov d, count_test_dataEnd
+    
+    mov [testExpectedA], a ; unchanged
+    mov [testExpectedC], count_test_dataEnd ; becomes endAddr
+    mov [testExpectedD], count_test_dataEnd ; unchanged
+
+    call count
+    ret
+    
+count_test1:
+    ; the value 11 shows up 1 time in test_data
+    mov a, 11
+    mov [testExpectedB], 1
+    jmp count_test_helper
+count_test2:
+    mov a, 22
+    mov [testExpectedB], 2
+    jmp count_test_helper
+count_test3:
+    mov a, 33
+    mov [testExpectedB], 3
+    jmp count_test_helper
+count_test4:
+    mov a, 44
+    mov [testExpectedB], 4
+    jmp count_test_helper
+count_test5:
+    mov a, 55
+    mov [testExpectedB], 5
+    jmp count_test_helper
 
 
 
@@ -975,6 +1030,13 @@ random:
     xor a, b
     mov [_rngState], a
     ret
+
+random_test:
+    or [testCorruptRegs], REG_A ; result is random, can't predict it
+    or [testCorruptRegs], REG_B
+    call random
+    ret
+
 
 
 
