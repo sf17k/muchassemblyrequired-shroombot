@@ -1,15 +1,35 @@
-; collector bot
-; it gathers things
+;;; OPTIONS
+TESTING equ 1
 
-; todo
-; - locate resource
-; - move to resource
-; - harvest resource
-; - bring resource to cache
-; - deposit resource at cache
+
+;   ,-------------------,
+;   | Hello, my name is |
+;   |     shroombot     |
+;   `-------------------'
+
+;;; Tips
+; Names prefixed with _underscores are implementation details.
+
+;;; Memory layout
+; 0x0000 lidar path
+; 0x0050 execution statistics
+; 0x0100 lidar map
+; 0x0200 the program (.data and .text)
+
+
 
 FALSE equ 0x0000 ; must be 0x0000
 TRUE equ 0xffff ; must be 0xffff
+
+; registers for testing
+REG_A equ 0x0001
+REG_B equ 0x0002
+REG_C equ 0x0004
+REG_D equ 0x0008
+REG_X equ 0x0010
+REG_Y equ 0x0020
+REG_BP equ 0x0040
+REG_SP equ 0x0080
 
 DIR_N equ 0
 DIR_E equ 1
@@ -58,11 +78,6 @@ MAP_CUBOT equ 0x0080
 
 
 
-; memory layout:
-; 0x0000 lidar path
-; 0x0100 lidar map
-; 0x0200 .data section
-
 .data
 
 debugValue: dw 0xDEAD ; printed value
@@ -78,10 +93,42 @@ isTargetMoving: dw FALSE
 
 
 
-; entry point
-
 .text
+    ; run tests or main code
+    mov a, TESTING
+    cmp a, 0
+    jz run
+    jmp runAllTests
 
+
+
+; runAllTests (entry point)
+
+; Runs tests, shows results, and halts.
+
+; Results marked by 0xF00D on success, 0xDEAD on failure.
+; Next value is number of passed tests, more details may follow.
+
+runAllTests:
+    call _preAllTests
+    
+    ; --- ALL TESTS ---
+
+    mov [nextTest], seedRng_test
+    call runTest
+    
+    ; ^ ADD TESTS HERE ^
+
+    call _postAllTests
+    brk
+
+
+
+; run (entry point)
+
+; Main code. Halts when finished.
+
+run:
     ; cheat
     mov a, -1
     hwi HW_BATTERY
@@ -105,17 +152,14 @@ isTargetMoving: dw FALSE
     ; if battery full, take a step
     call usedCharge ; in b
     cmp b, 0
-    jnz entry_endif
+    jnz run_endif
     mov a, LEGS_WALK ; walk
     mov b, [facingDir]
     hwi HW_LEGS
     
-entry_endif:
-    
+run_endif:
     ; debug printing
-    
     call displayDebugValues
-    
     brk
 
 
@@ -139,7 +183,7 @@ displayDebugValues:
     push b
     
     
-    ; numberOfValues = bp - sp
+    ; numValues = bp - sp
     mov a, bp
     sub a, sp
     
@@ -152,32 +196,32 @@ displayDebugValues:
 
 
 ; marquee(value...)
-; in a: numberOfValues
+; in a: numValues
 
 ; Show values in sequence using hologram.
-; Changing numberOfValues will throw off the sequence.
+; Changing numValues will throw off the sequence.
 
 marquee:
     push bp
     mov bp, sp
     
-    mov d, a ; numberOfValues
+    mov d, a ; numValues
     
     ; calculate index
     hwi HW_CLOCK ; clock in b:c
     mov y, b ; copy to y:a
     mov a, c
-    div d ; index in y = clock % numberOfValues
+    div d ; index in y = clock % numValues
     
     ; show indexed value
-    mov b, d ; numberOfValues
+    mov b, d ; numValues
     sub b, y ; - index (cuz upside down stack)
     add b, bp ; + bp
     mov b, [b+1] ; + arg offset of 2 - 1 = &value
     mov a, HOLO_DISPLAY_HEX
     hwi HW_HOLO
     
-    mov a, d ; restore a to numberOfValues TODO replace with 'ret d'
+    mov a, d ; restore a to numValues TODO replace with 'ret d'
     
     pop bp
     ret
@@ -654,6 +698,283 @@ count_end:
 
 
 
+; TESTING FRAMEWORK ===========================================================
+
+; Test functions should be careful not to modify any registers themselves.
+; The registers will be set to random values and checked for modification.
+
+; Example assert usages:
+;   mov [testExpectedA], 0x1234
+;   or [testCorruptRegs], REG_A
+
+; Example test run:
+;   mov [nextTest], testMyStuff
+;   call runTest
+
+
+; the test func, i.e. a func whose name ends with "_test"
+; which in turn calls the *tested* func(s)
+nextTest: dw 0 ; addr
+
+; which registers should we NOT check?
+testCorruptRegs: dw 0x0000 ; flags
+
+; which registers failed their checks?
+testFailedRegs: dw 0x0000 ; flags
+
+; helps identify which test failed
+testNumPassed: dw 0
+
+; asserted values
+testExpectedA: dw 0
+testExpectedB: dw 0
+testExpectedC: dw 0
+testExpectedD: dw 0
+testExpectedX: dw 0
+testExpectedY: dw 0
+testExpectedBP: dw 0
+testExpectedSP: dw 0
+
+; for error reporting
+testActualA: dw 0
+testActualB: dw 0
+testActualC: dw 0
+testActualD: dw 0
+testActualX: dw 0
+testActualY: dw 0
+testActualBP: dw 0
+testActualSP: dw 0
+
+; only run once
+_testsPerformed: dw FALSE
+
+
+
+_preAllTests:
+    ; if tests finished, show results
+    cmp [_testsPerformed], TRUE
+    jz _preAllTests_results
+    mov [_testsPerformed], TRUE
+    
+    ; init RNG
+    call seedRng
+    
+    ret
+    
+_preAllTests_results:
+    call _showTestResults
+    brk
+
+
+
+_postAllTests:
+    call _showTestResults
+    ret
+
+
+
+_showTestResults:
+    ; if all passed, show success
+    cmp [testFailedRegs], 0x0000
+    jz _showTestResults_success
+    
+    ; show failure
+    push 0xDEAD ; marker
+    push [testNumPassed]
+    push [testFailedRegs]
+    push [testActualA]
+    push [testActualB]
+    push [testActualC]
+    push [testActualD]
+    push [testActualX]
+    push [testActualY]
+    mov a, 9 ; numValues
+    call marquee
+    add sp, a ; pop values TODO
+    
+    jmp _showTestResults_end
+    
+_showTestResults_success:
+    ; show success
+    push 0xF00D ; marker
+    push [testNumPassed]
+    mov a, 2 ; numValues
+    call marquee
+    add sp, a ; pop values TODO
+    
+_showTestResults_end:
+    ret
+
+
+
+; runTest()
+; in a: testFunc
+
+; Runs testFunc with pre and post tasks.
+
+runTest:
+    call _preTest
+    call [nextTest]
+    call _postTest
+    mov [nextTest], 0 ; reset
+    ret
+
+
+_preTest:
+    mov [testCorruptRegs], 0x0000
+
+    ; initialize registers with random numbers (except bp, sp)
+    call random
+    mov [testExpectedA], a
+    call random
+    mov [testExpectedB], a
+    call random
+    mov [testExpectedC], a
+    call random
+    mov [testExpectedD], a
+    call random
+    mov [testExpectedX], a
+    call random
+    mov [testExpectedY], a
+    mov [testExpectedBP], bp
+    mov [testExpectedSP], sp ; sp last
+
+    mov a, [testExpectedA]
+    mov b, [testExpectedB]
+    mov c, [testExpectedC]
+    mov d, [testExpectedD]
+    mov x, [testExpectedX]
+    mov y, [testExpectedY]
+
+    ret
+
+
+_postTest:
+    ; save all registers
+    mov [testActualA], a
+    mov [testActualB], b
+    mov [testActualC], c
+    mov [testActualD], d
+    mov [testActualX], x
+    mov [testActualY], y
+    mov [testActualBP], bp
+    mov [testActualSP], sp
+
+    ; check that registers match expected values
+
+    mov [testFailedRegs], 0x0000 ; clear errors
+    mov c, [testCorruptRegs]
+
+    ; check register A
+    test c, REG_A ; if expected corrupt, pass
+    jnz _postTest_endA
+    cmp [testActualA], [testExpectedA] ; if actual == expected, pass
+    jz _postTest_endA
+    or [testFailedRegs], REG_A ; fail
+_postTest_endA:
+    ; check register B...
+    test c, REG_B
+    jnz _postTest_endB
+    cmp [testActualB], [testExpectedB]
+    jz _postTest_endB
+    or [testFailedRegs], REG_B
+_postTest_endB:
+    test c, REG_C
+    jnz _postTest_endC
+    cmp [testActualC], [testExpectedC]
+    jz _postTest_endC
+    or [testFailedRegs], REG_C
+_postTest_endC:
+    test c, REG_D
+    jnz _postTest_endD
+    cmp [testActualD], [testExpectedD]
+    jz _postTest_endD
+    or [testFailedRegs], REG_D
+_postTest_endD:
+    test c, REG_X
+    jnz _postTest_endX
+    cmp [testActualX], [testExpectedX]
+    jz _postTest_endX
+    or [testFailedRegs], REG_X
+_postTest_endX:
+    test c, REG_Y
+    jnz _postTest_endY
+    cmp [testActualY], [testExpectedY]
+    jz _postTest_endY
+    or [testFailedRegs], REG_Y
+_postTest_endY:
+    test c, REG_BP
+    jnz _postTest_endBP
+    cmp [testActualBP], [testExpectedBP]
+    jz _postTest_endBP
+    or [testFailedRegs], REG_BP
+_postTest_endBP:
+    test c, REG_SP
+    jnz _postTest_endSP
+    cmp [testActualSP], [testExpectedSP]
+    jz _postTest_endSP
+    or [testFailedRegs], REG_SP
+_postTest_endSP:
+
+    ; if all passed, move on
+    cmp [testFailedRegs], 0x0000
+    jz _postTest_end
+
+    ; else show error and halt
+    call _showTestResults
+    brk ; halt
+
+_postTest_end:
+    add [testNumPassed], 1 ; won't reach this if failed
+    ret
+
+
+
+; RNG =========================================================================
+
+; data
+
+_rngState: dw 0x5837 ; randomly chosen initial value
+
+
+
+; seedRng()
+; corrupt b
+
+; Seed RNG using hardware RNG, at small energy cost.
+
+seedRng:
+    hwi HW_RNG
+    mov [_rngState], b
+    ret
+
+seedRng_test:
+    or [testCorruptRegs], REG_B
+    call seedRng
+    ret
+
+
+
+; random()
+; out a: result
+; corrupt b
+
+; Returns random word without relying on hardware RNG.
+; http://www.retroprogramming.com/2017/07/xorshift-pseudorandom-numbers-in-z80.html
+
+random:
+    mov a, [_rngState]
+    mov b, a ; xs ^= xs << 7
+    shl b, 7
+    xor a, b
+    mov b, a ; xs ^= xs >> 9
+    shr b, 9
+    xor a, b
+    mov b, a ; xs ^= xs << 8
+    shl b, 8
+    xor a, b
+    mov [_rngState], a
+    ret
 
 
 
