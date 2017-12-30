@@ -1,22 +1,40 @@
-;;; OPTIONS
-TESTING equ 1
+;;  Options
+RUN_TESTS equ 1
+
+;;                         ,-------------------,
+;;                         | Hello, my name is |
+;;                         |     shroombot     |
+;;                         `-------------------'
 
 
-;   ,-------------------,
-;   | Hello, my name is |
-;   |     shroombot     |
-;   `-------------------'
 
-;;; Tips
+;;  Table of Contents [toc]
+; 0. START
+; 1. BEHAVIOR
+; 2. DRIVERS
+;    - Movement
+;    - Display
+;    - Sensors
+; 3. TESTING
+; 4. MATH
+; 5. TYPES
+;    - Map
+; 6. UTILITY
+
+
+
+;;  Tips
 ; Names prefixed with _underscores are implementation details.
 
-;;; Memory layout
+;;  Memory layout
 ; 0x0000 lidar path
-; 0x0050 execution statistics
+; 0x0050 some execution statistics
 ; 0x0100 lidar map
 ; 0x0200 the program (.data and .text)
 
 
+
+;;  Constants
 
 FALSE equ 0x0000 ; must be 0x0000
 TRUE equ 0xffff ; must be 0xffff
@@ -78,6 +96,9 @@ MAP_CUBOT equ 0x0080
 
 
 
+;;                                                              0. START
+;;  ********************************************************************
+
 .data
 
 debugValue: dw 0xDEAD ; printed value
@@ -91,18 +112,18 @@ lastTargetX: dw -1
 lastTargetY: dw -1
 isTargetMoving: dw FALSE
 
-
-
 .text
+
+entryPoint:
     ; run tests or main code
-    mov a, TESTING
+    mov a, RUN_TESTS
     cmp a, 0
     jz run
     jmp runAllTests
 
 
 
-; runAllTests (entry point)
+;;  runAllTests (entry point)
 
 ; Runs tests, shows results, and halts.
 
@@ -136,7 +157,7 @@ runAllTests:
 
 
 
-; run (entry point)
+;;  run (entry point)
 
 ; Main code. Halts when finished.
 
@@ -176,7 +197,7 @@ run_endif:
 
 
 
-; displayDebugValues()
+;;  displayDebugValues()
 
 ; TODO function to add a value to an array
 
@@ -207,7 +228,10 @@ displayDebugValues:
 
 
 
-; updateMapPeriodically()
+;;                                                           1. BEHAVIOR
+;;  ********************************************************************
+
+;;  updateMapPeriodically()
 
 updateMapPeriodically:
     mov [didMapUpdateThisTick], FALSE
@@ -238,7 +262,7 @@ updateMapPeriodically_end:
 
 
 
-; updateMapIfBatteryFull()
+;;  updateMapIfBatteryFull()
 
 ; TODO change to isBatteryFull()
 
@@ -260,8 +284,8 @@ updateMapIfBatteryFull_end:
 
 
 
-; updateTarget()
-; in x,y: newTarget
+;;  updateTarget()
+;;  in x,y: newTarget
 
 ; Sets lastTargetX, lastTargetY, isTargetMoving.
 
@@ -290,8 +314,14 @@ updateTarget_end:
 
 
 
-; stepOnce()
-; in b: direction
+;;                                                            2. DRIVERS
+;;  ********************************************************************
+
+;;                                                          Movement
+;;  ----------------------------------------------------------------
+
+;;  stepOnce()
+;;  in b: direction
 
 ; Manual command to take one step.
 
@@ -309,9 +339,9 @@ stepOnce_end:
 
 
 
-; stepN()
-; in a: numSteps
-; in b: direction
+;;  stepN()
+;;  in a: numSteps
+;;  in b: direction
 
 ; Manual command to take multiple steps in one direction.
 
@@ -344,8 +374,8 @@ stepN_end:
 
 
 
-; faceToward()
-; in x,y: target
+;;  faceToward()
+;;  in x,y: target
 
 ; Costs 20 kJ if need to turn.
 
@@ -405,9 +435,9 @@ faceToward_end:
 
 
 
-; moveTo()
-; in a: distance
-; in x,y: destination
+;;  moveTo()
+;;  in a: distance
+;;  in x,y: destination
 
 ; Manual command to pathfind and move to destination.
 ; Costs an extra 50 kJ per pathfind.
@@ -483,8 +513,11 @@ moveTo_end:
 
 
 
-; marquee(value...)
-; in a: numValues
+;;                                                           Display
+;;  ----------------------------------------------------------------
+
+;;  marquee(value...)
+;;  in a: numValues
 
 ; Show values in sequence using hologram.
 ; Changing numValues will throw off the sequence.
@@ -514,8 +547,11 @@ marquee:
 
 
 
-; usedCharge()
-; out b: capacity - charge
+;;                                                           Sensors
+;;  ----------------------------------------------------------------
+
+;;  usedCharge()
+;;  out b: capacity - charge
 
 usedCharge:
     mov a, BATTERY_GET_CHARGE
@@ -528,7 +564,8 @@ usedCharge:
 
 
 
-; TESTING FRAMEWORK ===========================================================
+;;                                                            3. TESTING
+;;  ********************************************************************
 
 ; Test functions should be careful not to modify any registers themselves.
 ; The registers will be set to random values and checked for modification.
@@ -635,8 +672,8 @@ _showTestResults_end:
 
 
 
-; runTest()
-; in a: testFunc
+;;  runTest()
+;;  in a: testFunc
 
 ; Runs testFunc with pre and post tasks.
 
@@ -758,16 +795,15 @@ _postTest_end:
 
 
 
-; RNG =========================================================================
-
-; data
+;;                                                               4. MATH
+;;  ********************************************************************
 
 _rngState: dw 0x5837 ; randomly chosen initial value
 
 
 
-; seedRng()
-; corrupt b
+;;  seedRng()
+;;  corrupt b
 
 ; Seed RNG using hardware RNG, at small energy cost.
 
@@ -783,9 +819,9 @@ seedRng_test:
 
 
 
-; random()
-; out a: result
-; corrupt b
+;;  random()
+;;  out a: result
+;;  corrupt b
 
 ; Returns random word without relying on hardware RNG.
 ; http://www.retroprogramming.com/2017/07/xorshift-pseudorandom-numbers-in-z80.html
@@ -812,9 +848,15 @@ random_test:
 
 
 
-; searchMap()
-; in a: item to search for
-; out x,y: position or (-1,-1)
+;;                                                              5. TYPES
+;;  ********************************************************************
+
+;;                                                               Map
+;;  ----------------------------------------------------------------
+
+;;  searchMap()
+;;  in a: item to search for
+;;  out x,y: position or (-1,-1)
 
 ; Searches the map that's in memory, so make sure it's up to date.
 ; Ignores own position.
@@ -865,9 +907,9 @@ searchMap_fail:
 
 
 
-; mapXYToIndex()
-; in x,y: coords
-; out a: index in [0, MAP_SIZE), i.e. a byte
+;;  mapXYToIndex()
+;;  in x,y: coords
+;;  out a: index in [0, MAP_SIZE), i.e. a byte
 
 mapXYToIndex:
     ; index bits are 0000 0000 yyyy xxxx
@@ -878,9 +920,9 @@ mapXYToIndex:
 
 
 
-; mapIndexToXY()
-; in a: index in [0, MAP_SIZE), i.e. a byte
-; out x,y: coords
+;;  mapIndexToXY()
+;;  in a: index in [0, MAP_SIZE), i.e. a byte
+;;  out x,y: coords
 
 mapIndexToXY:
     ; index bits are 0000 0000 yyyy xxxx
@@ -894,12 +936,15 @@ mapIndexToXY:
 
 
 
-; findNth()
-; in a: value
-; in b: N
-; in c: startAddr
-; in d: endAddr
-; out c: result or endAddr
+;;                                                            6. UTILITY
+;;  ********************************************************************
+
+;;  findNth()
+;;  in a: value
+;;  in b: N
+;;  in c: startAddr
+;;  in d: endAddr
+;;  out c: result or endAddr
 
 ; Search memory sequentially for Nth occurrence of value,
 ; where the first occurrence is the 0th.
@@ -924,11 +969,11 @@ findNth_end:
 
 
 
-; findNext()
-; in a: value
-; in c: startAddr
-; in d: endAddr
-; out c: result or endAddr
+;;  findNext()
+;;  in a: value
+;;  in c: startAddr
+;;  in d: endAddr
+;;  out c: result or endAddr
 
 ; Search memory sequentially for value.
 ; Return address of first occurrence, or endAddr if not found.
@@ -950,11 +995,11 @@ findNext_end:
 
 
 
-; count()
-; in a: value
-; in c: startAddr
-; in d: endAddr
-; out b: count
+;;  count()
+;;  in a: value
+;;  in c: startAddr
+;;  in d: endAddr
+;;  out b: count
 
 ; corrupts c
 
@@ -985,7 +1030,7 @@ count_end:
 count_test_data: dw 55,33,11,22,33,44,44,44,44,55,33,22,55,55,55
 count_test_dataEnd: dw -1
 
-; in a: value
+;;  in a: value
 count_test_helper:
     ; startAddr
     mov c, count_test_data
@@ -1020,8 +1065,6 @@ count_test5:
     mov a, 55
     mov [testExpectedB], 5
     jmp count_test_helper
-
-
 
 
 
