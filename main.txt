@@ -207,47 +207,85 @@ displayDebugValues:
 
 
 
-; marquee(value...)
-; in a: numValues
+; updateMapPeriodically()
 
-; Show values in sequence using hologram.
-; Changing numValues will throw off the sequence.
-
-marquee:
-    push bp
-    mov bp, sp
+updateMapPeriodically:
+    mov [didMapUpdateThisTick], FALSE
     
-    mov d, a ; numValues
+    ; modulo clock for periodic updates
+    mov c, [isTargetMoving] ; if moving, use interval for moving, else the other one
+    mov d, c ; d = ~c
+    not d
+    and c, MAP_UPDATE_INTERVAL_MOVING ; d = isTargetMoving ? intervalMoving : interval
+    and d, MAP_UPDATE_INTERVAL
+    or d, c
     
-    ; calculate index
-    hwi HW_CLOCK ; clock in b:c
-    mov y, b ; copy to y:a
+    hwi HW_CLOCK ; time in b:c
+    mov y, b ; copy to y:a for modulo
     mov a, c
-    div d ; index in y = clock % numValues
+    div d ; clock % interval, remainder in y
     
-    ; show indexed value
-    mov b, d ; numValues
-    sub b, y ; - index (cuz upside down stack)
-    add b, bp ; + bp
-    mov b, [b+1] ; + arg offset of 2 - 1 = &value
-    mov a, HOLO_DISPLAY_HEX
-    hwi HW_HOLO
+    cmp y, 0 ; if remainder is 0, time to update
+    jnz updateMapPeriodically_end
     
-    pop bp
-    ret d ; pop args
+    ; get map
+    mov a, LIDAR_GET_MAP
+    hwi HW_LIDAR
+    mov [didMapUpdateThisTick], TRUE
+    
+updateMapPeriodically_end:
+    ret
 
 
 
-; usedCharge()
-; out b: capacity - charge
+; updateMapIfBatteryFull()
 
-usedCharge:
+; TODO change to isBatteryFull()
+
+updateMapIfBatteryFull:
     mov a, BATTERY_GET_CHARGE
     hwi HW_BATTERY
     mov c, b
     mov a, BATTERY_GET_CAPACITY
     hwi HW_BATTERY
-    sub b, c
+    cmp c, b ; if not full, return
+    jl updateMapIfBatteryFull_end
+    
+    ; get map
+    mov a, LIDAR_GET_MAP
+    hwi HW_LIDAR
+    
+updateMapIfBatteryFull_end:
+    ret
+
+
+
+; updateTarget()
+; in x,y: newTarget
+
+; Sets lastTargetX, lastTargetY, isTargetMoving.
+
+updateTarget:
+    ; only update if map has updated
+    cmp [didMapUpdateThisTick], 0
+    jz updateTarget_end
+    
+    ; has target moved?
+    cmp [lastTargetX], x
+    jnz updateTarget_moved
+    cmp [lastTargetY], y
+    jnz updateTarget_moved
+    
+    ; not moved
+    mov [isTargetMoving], FALSE
+    ret
+    
+updateTarget_moved:
+    mov [isTargetMoving], TRUE
+    mov [lastTargetX], x
+    mov [lastTargetY], y
+    
+updateTarget_end:
     ret
 
 
@@ -445,297 +483,48 @@ moveTo_end:
 
 
 
-; updateMapPeriodically()
+; marquee(value...)
+; in a: numValues
 
-updateMapPeriodically:
-    mov [didMapUpdateThisTick], FALSE
+; Show values in sequence using hologram.
+; Changing numValues will throw off the sequence.
+
+marquee:
+    push bp
+    mov bp, sp
     
-    ; modulo clock for periodic updates
-    mov c, [isTargetMoving] ; if moving, use interval for moving, else the other one
-    mov d, c ; d = ~c
-    not d
-    and c, MAP_UPDATE_INTERVAL_MOVING ; d = isTargetMoving ? intervalMoving : interval
-    and d, MAP_UPDATE_INTERVAL
-    or d, c
+    mov d, a ; numValues
     
-    hwi HW_CLOCK ; time in b:c
-    mov y, b ; copy to y:a for modulo
+    ; calculate index
+    hwi HW_CLOCK ; clock in b:c
+    mov y, b ; copy to y:a
     mov a, c
-    div d ; clock % interval, remainder in y
+    div d ; index in y = clock % numValues
     
-    cmp y, 0 ; if remainder is 0, time to update
-    jnz updateMapPeriodically_end
+    ; show indexed value
+    mov b, d ; numValues
+    sub b, y ; - index (cuz upside down stack)
+    add b, bp ; + bp
+    mov b, [b+1] ; + arg offset of 2 - 1 = &value
+    mov a, HOLO_DISPLAY_HEX
+    hwi HW_HOLO
     
-    ; get map
-    mov a, LIDAR_GET_MAP
-    hwi HW_LIDAR
-    mov [didMapUpdateThisTick], TRUE
-    
-updateMapPeriodically_end:
-    ret
+    pop bp
+    ret d ; pop args
 
 
 
-; updateMapIfBatteryFull()
+; usedCharge()
+; out b: capacity - charge
 
-; TODO change to isBatteryFull()
-
-updateMapIfBatteryFull:
+usedCharge:
     mov a, BATTERY_GET_CHARGE
     hwi HW_BATTERY
     mov c, b
     mov a, BATTERY_GET_CAPACITY
     hwi HW_BATTERY
-    cmp c, b ; if not full, return
-    jl updateMapIfBatteryFull_end
-    
-    ; get map
-    mov a, LIDAR_GET_MAP
-    hwi HW_LIDAR
-    
-updateMapIfBatteryFull_end:
+    sub b, c
     ret
-
-
-
-; searchMap()
-; in a: item to search for
-; out x,y: position or (-1,-1)
-
-; Searches the map that's in memory, so make sure it's up to date.
-; Ignores own position.
-
-searchMap:
-    push a ; item
-    
-    ; index of own position, so we can skip it
-    ; (in case we're searching for cubots)
-    mov a, LIDAR_GET_POS
-    hwi HW_LIDAR
-    call mapXYToIndex
-    mov b, a ; ownIndex
-    add b, LIDAR_MAP_ADDR
-    
-    ; search map for item
-    pop a ; value = item
-    mov c, LIDAR_MAP_ADDR ; startAddr
-    mov d, c
-    add d, MAP_SIZE ; endAddr
-    
-searchMap_loop:
-    ; search
-    call findNext
-    
-    ; if found own position, keep searching
-    cmp c, b
-    jnz searchMap_finishedSearch
-    add c, 1 ; skip this position
-    jmp searchMap_loop
-
-searchMap_finishedSearch:
-    cmp c, d ; if not found, return (-1, -1)
-    jz searchMap_fail
-    
-    ; index = resultAddr - startAddr
-    mov a, c
-    sub a, LIDAR_MAP_ADDR
-    
-    ; return x,y
-    call mapIndexToXY
-    ret
-    
-searchMap_fail:
-    mov x, -1
-    mov y, -1
-    ret
-
-
-
-; updateTarget()
-; in x,y: newTarget
-
-; Sets lastTargetX, lastTargetY, isTargetMoving.
-
-updateTarget:
-    ; only update if map has updated
-    cmp [didMapUpdateThisTick], 0
-    jz updateTarget_end
-    
-    ; has target moved?
-    cmp [lastTargetX], x
-    jnz updateTarget_moved
-    cmp [lastTargetY], y
-    jnz updateTarget_moved
-    
-    ; not moved
-    mov [isTargetMoving], FALSE
-    ret
-    
-updateTarget_moved:
-    mov [isTargetMoving], TRUE
-    mov [lastTargetX], x
-    mov [lastTargetY], y
-    
-updateTarget_end:
-    ret
-
-
-
-; mapXYToIndex()
-; in x,y: coords
-; out a: index in [0, MAP_SIZE), i.e. a byte
-
-mapXYToIndex:
-    ; index bits are 0000 0000 yyyy xxxx
-    mov a, y
-    shl a, 4
-    or a, x
-    ret
-
-
-
-; mapIndexToXY()
-; in a: index in [0, MAP_SIZE), i.e. a byte
-; out x,y: coords
-
-mapIndexToXY:
-    ; index bits are 0000 0000 yyyy xxxx
-    mov x, a
-    and x, 0x000f
-    
-    mov y, a
-    shr y, 4
-    and y, 0x000f
-    ret
-
-
-
-; findNth()
-; in a: value
-; in b: N
-; in c: startAddr
-; in d: endAddr
-; out c: result or endAddr
-
-; Search memory sequentially for Nth occurrence of value,
-; where the first occurrence is the 0th.
-; Return address of Nth occurrence, or endAddr if not found.
-; endAddr is one past last item to be searched.
-
-findNth:
-    ; start loop
-    cmp c, d ; if reached end, return
-    jge findNth_end
-    
-    call findNext ; find next occurrence
-    
-    cmp b, 0 ; if searched N times, return
-    jz findNth_end
-    
-    sub b, 1 ; advance
-    jmp findNth ; loop
-    
-findNth_end:
-    ret
-
-
-
-; findNext()
-; in a: value
-; in c: startAddr
-; in d: endAddr
-; out c: result or endAddr
-
-; Search memory sequentially for value.
-; Return address of first occurrence, or endAddr if not found.
-; endAddr is one past last item to be searched.
-
-findNext:
-    ; start loop
-    cmp c, d ; if reached end, return
-    jge findNext_end
-    
-    cmp a, [c] ; if found value, return
-    jz findNext_end
-    
-    add c, 1 ; advance
-    jmp findNext ; loop
-    
-findNext_end:
-    ret
-
-
-
-; count()
-; in a: value
-; in c: startAddr
-; in d: endAddr
-; out b: count
-
-; corrupts c
-
-; Search memory region for value, count number of occurrences.
-; endAddr is one past last item to be searched.
-
-count:
-    mov b, 0 ; counter
-    
-count_loop:
-    ; start loop
-    cmp c, d ; if reached end, return
-    jge count_end
-    
-    cmp a, [c] ; if found value, increment counter
-    jnz count_next
-    add b, 1
-    
-count_next:
-    add c, 1 ; advance
-    jmp count_loop ; loop
-    
-count_end:
-    ret
-
-
-
-count_test_data: dw 55,33,11,22,33,44,44,44,44,55,33,22,55,55,55
-count_test_dataEnd: dw -1
-
-; in a: value
-count_test_helper:
-    ; startAddr
-    mov c, count_test_data
-    ; endAddr
-    mov d, count_test_dataEnd
-    
-    mov [testExpectedA], a ; unchanged
-    mov [testExpectedC], count_test_dataEnd ; becomes endAddr
-    mov [testExpectedD], count_test_dataEnd ; unchanged
-
-    call count
-    ret
-    
-count_test1:
-    ; the value 11 shows up 1 time in test_data
-    mov a, 11
-    mov [testExpectedB], 1
-    jmp count_test_helper
-count_test2:
-    mov a, 22
-    mov [testExpectedB], 2
-    jmp count_test_helper
-count_test3:
-    mov a, 33
-    mov [testExpectedB], 3
-    jmp count_test_helper
-count_test4:
-    mov a, 44
-    mov [testExpectedB], 4
-    jmp count_test_helper
-count_test5:
-    mov a, 55
-    mov [testExpectedB], 5
-    jmp count_test_helper
 
 
 
@@ -1020,6 +809,217 @@ random_test:
     or [testCorruptRegs], REG_B
     call random
     ret
+
+
+
+; searchMap()
+; in a: item to search for
+; out x,y: position or (-1,-1)
+
+; Searches the map that's in memory, so make sure it's up to date.
+; Ignores own position.
+
+searchMap:
+    push a ; item
+    
+    ; index of own position, so we can skip it
+    ; (in case we're searching for cubots)
+    mov a, LIDAR_GET_POS
+    hwi HW_LIDAR
+    call mapXYToIndex
+    mov b, a ; ownIndex
+    add b, LIDAR_MAP_ADDR
+    
+    ; search map for item
+    pop a ; value = item
+    mov c, LIDAR_MAP_ADDR ; startAddr
+    mov d, c
+    add d, MAP_SIZE ; endAddr
+    
+searchMap_loop:
+    ; search
+    call findNext
+    
+    ; if found own position, keep searching
+    cmp c, b
+    jnz searchMap_finishedSearch
+    add c, 1 ; skip this position
+    jmp searchMap_loop
+
+searchMap_finishedSearch:
+    cmp c, d ; if not found, return (-1, -1)
+    jz searchMap_fail
+    
+    ; index = resultAddr - startAddr
+    mov a, c
+    sub a, LIDAR_MAP_ADDR
+    
+    ; return x,y
+    call mapIndexToXY
+    ret
+    
+searchMap_fail:
+    mov x, -1
+    mov y, -1
+    ret
+
+
+
+; mapXYToIndex()
+; in x,y: coords
+; out a: index in [0, MAP_SIZE), i.e. a byte
+
+mapXYToIndex:
+    ; index bits are 0000 0000 yyyy xxxx
+    mov a, y
+    shl a, 4
+    or a, x
+    ret
+
+
+
+; mapIndexToXY()
+; in a: index in [0, MAP_SIZE), i.e. a byte
+; out x,y: coords
+
+mapIndexToXY:
+    ; index bits are 0000 0000 yyyy xxxx
+    mov x, a
+    and x, 0x000f
+    
+    mov y, a
+    shr y, 4
+    and y, 0x000f
+    ret
+
+
+
+; findNth()
+; in a: value
+; in b: N
+; in c: startAddr
+; in d: endAddr
+; out c: result or endAddr
+
+; Search memory sequentially for Nth occurrence of value,
+; where the first occurrence is the 0th.
+; Return address of Nth occurrence, or endAddr if not found.
+; endAddr is one past last item to be searched.
+
+findNth:
+    ; start loop
+    cmp c, d ; if reached end, return
+    jge findNth_end
+    
+    call findNext ; find next occurrence
+    
+    cmp b, 0 ; if searched N times, return
+    jz findNth_end
+    
+    sub b, 1 ; advance
+    jmp findNth ; loop
+    
+findNth_end:
+    ret
+
+
+
+; findNext()
+; in a: value
+; in c: startAddr
+; in d: endAddr
+; out c: result or endAddr
+
+; Search memory sequentially for value.
+; Return address of first occurrence, or endAddr if not found.
+; endAddr is one past last item to be searched.
+
+findNext:
+    ; start loop
+    cmp c, d ; if reached end, return
+    jge findNext_end
+    
+    cmp a, [c] ; if found value, return
+    jz findNext_end
+    
+    add c, 1 ; advance
+    jmp findNext ; loop
+    
+findNext_end:
+    ret
+
+
+
+; count()
+; in a: value
+; in c: startAddr
+; in d: endAddr
+; out b: count
+
+; corrupts c
+
+; Search memory region for value, count number of occurrences.
+; endAddr is one past last item to be searched.
+
+count:
+    mov b, 0 ; counter
+    
+count_loop:
+    ; start loop
+    cmp c, d ; if reached end, return
+    jge count_end
+    
+    cmp a, [c] ; if found value, increment counter
+    jnz count_next
+    add b, 1
+    
+count_next:
+    add c, 1 ; advance
+    jmp count_loop ; loop
+    
+count_end:
+    ret
+
+
+
+count_test_data: dw 55,33,11,22,33,44,44,44,44,55,33,22,55,55,55
+count_test_dataEnd: dw -1
+
+; in a: value
+count_test_helper:
+    ; startAddr
+    mov c, count_test_data
+    ; endAddr
+    mov d, count_test_dataEnd
+    
+    mov [testExpectedA], a ; unchanged
+    mov [testExpectedC], count_test_dataEnd ; becomes endAddr
+    mov [testExpectedD], count_test_dataEnd ; unchanged
+
+    call count
+    ret
+    
+count_test1:
+    ; the value 11 shows up 1 time in test_data
+    mov a, 11
+    mov [testExpectedB], 1
+    jmp count_test_helper
+count_test2:
+    mov a, 22
+    mov [testExpectedB], 2
+    jmp count_test_helper
+count_test3:
+    mov a, 33
+    mov [testExpectedB], 3
+    jmp count_test_helper
+count_test4:
+    mov a, 44
+    mov [testExpectedB], 4
+    jmp count_test_helper
+count_test5:
+    mov a, 55
+    mov [testExpectedB], 5
+    jmp count_test_helper
 
 
 
