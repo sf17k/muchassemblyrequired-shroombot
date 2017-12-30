@@ -137,10 +137,6 @@ runAllTests:
     call runTest
     mov [nextTest], count_test3
     call runTest
-    mov [nextTest], count_test4
-    call runTest
-    mov [nextTest], count_test5
-    call runTest
     mov [nextTest], seedRng_test
     call runTest
     mov [nextTest], random_test
@@ -1068,14 +1064,13 @@ count_end:
     ret
 
 ;;  TEST
-count_test_data: dw 55,33,11,22,33,44,44,44,44,55,33,22,55,55,55
-count_test_dataEnd: dw -1
-;;  in a: value
+dw 10 ; don't count before start
+count_test_data: dw 10,20,20,20,10
+dw 20 ; don't count after end
 count_test_helper:
-    ; startAddr
-    mov c, count_test_data
-    ; endAddr
-    mov d, count_test_dataEnd
+    mov c, count_test_data ; startAddr
+    mov d, count_test_data ; endAddr = startAddr + 5
+    add d, 5
     
     mov [testExpectedA], a
     mov [testExpectedC], c
@@ -1083,27 +1078,20 @@ count_test_helper:
 
     call count
     ret
-    
 count_test1:
-    ; the value 11 shows up 1 time in test_data
-    mov a, 11
-    mov [testExpectedB], 1
-    jmp count_test_helper
-count_test2:
-    mov a, 22
+    ; 10 shows up 2 times
+    mov a, 10
     mov [testExpectedB], 2
     jmp count_test_helper
-count_test3:
-    mov a, 33
+count_test2:
+    ; 20 shows up 3 times
+    mov a, 20
     mov [testExpectedB], 3
     jmp count_test_helper
-count_test4:
-    mov a, 44
-    mov [testExpectedB], 4
-    jmp count_test_helper
-count_test5:
-    mov a, 55
-    mov [testExpectedB], 5
+count_test3:
+    ; 30 shows up 0 times
+    mov a, 30
+    mov [testExpectedB], 0
     jmp count_test_helper
 
 
