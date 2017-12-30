@@ -101,16 +101,12 @@ MAP_CUBOT equ 0x0080
 
 .data
 
-debugValue: dw 0xDEAD ; printed value
-isStopped: dw FALSE ; disable further commands?
-stepN_stepsLeft: dw -1 ; -1 means no stepN command started yet
-moveTo_pathPtr: dw -1 ; -1 means not started
+debugValue: dw 0 ; printed value
+
+; bot status
 facingDir: dw -1 ; -1 means don't know yet
 
-didMapUpdateThisTick: dw FALSE
-lastTargetX: dw -1
-lastTargetY: dw -1
-isTargetMoving: dw FALSE
+
 
 .text
 
@@ -231,6 +227,13 @@ displayDebugValues:
 ;;                                                           1. BEHAVIOR
 ;;  ********************************************************************
 
+didMapUpdateThisTick: dw FALSE
+lastTargetX: dw -1
+lastTargetY: dw -1
+isTargetMoving: dw FALSE
+
+
+
 ;;  updateMapPeriodically()
 
 updateMapPeriodically:
@@ -320,6 +323,10 @@ updateTarget_end:
 ;;                                                          Movement
 ;;  ----------------------------------------------------------------
 
+isStopped: dw FALSE ; disable further commands?
+
+
+
 ;;  stepOnce()
 ;;  in b: direction
 
@@ -344,6 +351,8 @@ stepOnce_end:
 ;;  in b: direction
 
 ; Manual command to take multiple steps in one direction.
+
+stepN_stepsLeft: dw -1 ; -1 means no stepN command started yet
 
 stepN:
     cmp [isStopped], TRUE ; if isStopped, exit
@@ -442,6 +451,8 @@ faceToward_end:
 ; Manual command to pathfind and move to destination.
 ; Costs an extra 50 kJ per pathfind.
 ; Will not pathfind if destination already reached or outside bounds.
+
+moveTo_pathPtr: dw -1 ; -1 means not started
 
 moveTo:
     push a ; distance
