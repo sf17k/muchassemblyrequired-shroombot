@@ -252,18 +252,6 @@ usedCharge:
 
 
 
-; reset()
-
-; Reallows movement and breaks the program.
-; Intended for clearing manual commands.
-; (But you can just reupload the code.)
-
-reset:
-    mov [isStopped], FALSE
-    brk
-
-
-
 ; stepOnce()
 ; in b: direction
 
