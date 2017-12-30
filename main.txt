@@ -194,6 +194,7 @@ run_endif:
 
 
 ;;  displayDebugValues()
+;;  corrupt a,b
 
 ; TODO function to add a value to an array
 
@@ -234,6 +235,7 @@ isTargetMoving: dw FALSE
 
 
 ;;  updateMapPeriodically()
+;;  corrupt all
 
 updateMapPeriodically:
     mov [didMapUpdateThisTick], FALSE
@@ -265,6 +267,7 @@ updateMapPeriodically_end:
 
 
 ;;  updateMapIfBatteryFull()
+;;  corrupt a,b,c
 
 ; TODO change to isBatteryFull()
 
@@ -328,6 +331,7 @@ isStopped: dw FALSE ; disable further commands?
 
 ;;  stepOnce()
 ;;  in b: direction
+;;  corrupt a
 
 ; Manual command to take one step.
 
@@ -348,6 +352,7 @@ stepOnce_end:
 ;;  stepN()
 ;;  in a: numSteps
 ;;  in b: direction
+;;  corrupt a,d
 
 ; Manual command to take multiple steps in one direction.
 
@@ -384,6 +389,7 @@ stepN_end:
 
 ;;  faceToward()
 ;;  in x,y: target
+;;  corrupt all
 
 ; Costs 20 kJ if need to turn.
 
@@ -446,6 +452,7 @@ faceToward_end:
 ;;  moveTo()
 ;;  in a: distance
 ;;  in x,y: destination
+;;  corrupt all
 
 ; Manual command to pathfind and move to destination.
 ; Costs an extra 50 kJ per pathfind.
@@ -535,6 +542,12 @@ moveTo_end:
 marquee:
     push bp
     mov bp, sp
+    push a
+    push b
+    push c
+    push d
+    push x
+    push y
     
     mov d, a ; numValues
     
@@ -552,8 +565,14 @@ marquee:
     mov a, HOLO_DISPLAY_HEX
     hwi HW_HOLO
     
+    pop y
+    pop x
+    pop d
+    pop c
+    pop b
+    pop a
     pop bp
-    ret d ; pop args
+    ret a ; pop args
 
 
 
@@ -564,12 +583,18 @@ marquee:
 ;;  out b: capacity - charge
 
 usedCharge:
+    push a
+    push c
+
     mov a, BATTERY_GET_CHARGE
     hwi HW_BATTERY
     mov c, b
     mov a, BATTERY_GET_CAPACITY
     hwi HW_BATTERY
     sub b, c
+
+    pop c
+    pop a
     ret
 
 
@@ -622,7 +647,7 @@ testActualY: dw 0
 testActualBP: dw 0
 testActualSP: dw 0
 
-; only run once
+; set to prevent running tests more than once
 _testsPerformed: dw FALSE
 
 
@@ -684,6 +709,7 @@ _showTestResults_end:
 
 ;;  runTest()
 ;;  in a: testFunc
+;;  corrupt all
 
 ; Runs testFunc with pre and post tasks.
 
@@ -813,17 +839,18 @@ _rngState: dw 0x5837 ; randomly chosen initial value
 
 
 ;;  seedRng()
-;;  corrupt b
 
 ; Seed RNG using hardware RNG, at small energy cost.
 
 seedRng:
+    push b
     hwi HW_RNG
     mov [_rngState], b
+    pop b
     ret
 
+;;  TEST
 seedRng_test:
-    or [testCorruptRegs], REG_B
     call seedRng
     ret
 
@@ -831,12 +858,12 @@ seedRng_test:
 
 ;;  random()
 ;;  out a: result
-;;  corrupt b
 
 ; Returns random word without relying on hardware RNG.
 ; http://www.retroprogramming.com/2017/07/xorshift-pseudorandom-numbers-in-z80.html
 
 random:
+    push b
     mov a, [_rngState]
     mov b, a ; xs ^= xs << 7
     shl b, 7
@@ -848,11 +875,12 @@ random:
     shl b, 8
     xor a, b
     mov [_rngState], a
+    pop b
     ret
 
+;;  TEST
 random_test:
     or [testCorruptRegs], REG_A ; result is random, can't predict it
-    or [testCorruptRegs], REG_B
     call random
     ret
 
@@ -867,6 +895,7 @@ random_test:
 ;;  searchMap()
 ;;  in a: item to search for
 ;;  out x,y: position or (-1,-1)
+;;  corrupt all
 
 ; Searches the map that's in memory, so make sure it's up to date.
 ; Ignores own position.
@@ -890,7 +919,7 @@ searchMap:
     
 searchMap_loop:
     ; search
-    call findNext
+    call findNext ; out c
     
     ; if found own position, keep searching
     cmp c, b
@@ -908,11 +937,13 @@ searchMap_finishedSearch:
     
     ; return x,y
     call mapIndexToXY
-    ret
+    jmp searchMap_end
     
 searchMap_fail:
     mov x, -1
     mov y, -1
+
+searchMap_end:
     ret
 
 
@@ -955,6 +986,7 @@ mapIndexToXY:
 ;;  in c: startAddr
 ;;  in d: endAddr
 ;;  out c: result or endAddr
+;;  corrupt b
 
 ; Search memory sequentially for Nth occurrence of value,
 ; where the first occurrence is the 0th.
@@ -1011,12 +1043,11 @@ findNext_end:
 ;;  in d: endAddr
 ;;  out b: count
 
-; corrupts c
-
 ; Search memory region for value, count number of occurrences.
 ; endAddr is one past last item to be searched.
 
 count:
+    push c
     mov b, 0 ; counter
     
 count_loop:
@@ -1033,13 +1064,12 @@ count_next:
     jmp count_loop ; loop
     
 count_end:
+    pop c
     ret
 
-
-
+;;  TEST
 count_test_data: dw 55,33,11,22,33,44,44,44,44,55,33,22,55,55,55
 count_test_dataEnd: dw -1
-
 ;;  in a: value
 count_test_helper:
     ; startAddr
@@ -1047,9 +1077,9 @@ count_test_helper:
     ; endAddr
     mov d, count_test_dataEnd
     
-    mov [testExpectedA], a ; unchanged
-    mov [testExpectedC], count_test_dataEnd ; becomes endAddr
-    mov [testExpectedD], count_test_dataEnd ; unchanged
+    mov [testExpectedA], a
+    mov [testExpectedC], c
+    mov [testExpectedD], d
 
     call count
     ret
