@@ -146,6 +146,12 @@ runAllTests:
     call runTest
     mov [nextTest], testRandom
     call runTest
+    mov [nextTest], testAbs1
+    call runTest
+    mov [nextTest], testAbs2
+    call runTest
+    mov [nextTest], testAbs3
+    call runTest
 
     ;;  types
 
@@ -420,17 +426,13 @@ faceToward:
     sub d, y
     
     ; put absolute value of offset coords in x,y
-    mov x, c ; copy x
-    mov a, x ; abs
-    sar a, 15
-    xor x, a
-    sub x, a
-    mov y, d ; copy y
-    mov a, y ; abs
-    sar a, 15
-    xor y, a
-    sub y, a
-    
+    mov a, c
+    call abs
+    mov x, a
+    mov a, d
+    call abs
+    mov y, a
+
     ; pick larger dimension
     cmp x, y ; if abs(x) > abs(y), face a horizontal direction, else vertical
     jl faceToward_vertical
@@ -956,6 +958,41 @@ random:
 testRandom:
     or [expectCorruptRegs], REG_A ; result is random, can't predict it
     call random
+    ret
+
+
+
+;;  abs()
+;;  in a: value
+;;  out a: absoluteValue
+
+abs:
+    push b
+
+    ; some clever algorithm
+    mov b, a ; copy
+    sar b, 15 ; fill with sign bit
+    xor a, b ; if negative, flip all bits
+    sub a, b ; if negative, add 1 (twos-complement)
+
+    pop b
+    ret
+
+
+testAbs1: ; abs(0) -> 0
+    mov a, 0
+    mov [expectA], 0
+    call abs
+    ret
+testAbs2: ; abs(11) -> 11
+    mov a, 11
+    mov [expectA], 11
+    call abs
+    ret
+testAbs3: ; abs(-11) -> 11
+    mov a, -11
+    mov [expectA], 11
+    call abs
     ret
 
 
