@@ -1,5 +1,6 @@
 ;;  Options
 RUN_TESTS equ 1
+SKIP_COSTLY_TESTS equ 0
 
 ;;                         ,-------------------,
 ;;                         | Hello, my name is |
@@ -129,11 +130,14 @@ entryPoint:
 runAllTests:
     call _preAllTests
     
-    ;;  vvv TESTS vvv  #tsts
+
+    ;;  --- TESTS ---  #tsts
 
     ;;  behavior
 
     ;;  drivers
+    mov [nextTest], testClockModulo
+    call runTest
 
     ;;  testing
 
@@ -152,9 +156,26 @@ runAllTests:
     call runTest
     mov [nextTest], testCount3
     call runTest
-    
-    ;;  ^^^ END TESTS ^^^
+    mov [nextTest], testTernaryOp1
+    call runTest
+    mov [nextTest], testTernaryOp2
+    call runTest
 
+
+    ;;  --- TESTS THAT COST ENERGY ---
+
+    mov a, SKIP_COSTLY_TESTS
+    cmp a, 0
+    jnz runAllTests_end
+
+    ;;  drivers
+    mov [nextTest], testCostlyUpdateMap
+    call runTest
+
+    
+    ;;  --- END TESTS ---
+
+runAllTests_end:
     call _postAllTests
     brk
 
@@ -174,7 +195,7 @@ run:
     call updateMapPeriodically
     mov a, MAP_CUBOT
     call searchMap ; position or (-1,-1) in x,y
-    call updateTarget
+    call updateTargetStatus
     
     ; show target x,y
     mov [debugValue], x
@@ -244,29 +265,25 @@ _isTargetMoving: dw FALSE
 ;;  updateMapPeriodically()
 ;;  corrupt all
 
+; Must be called every tick for didMapUpdateThisTick to be correct.
+
 updateMapPeriodically:
     mov [didMapUpdateThisTick], FALSE
     
+    ; use different intervals based on whether target is moving
+    mov a, [_isTargetMoving]
+    mov b, MAP_UPDATE_INTERVAL_MOVING
+    mov c, MAP_UPDATE_INTERVAL
+    call ternaryOp ; select one of the constants into a
+    
     ; modulo clock for periodic updates
-    mov c, [_isTargetMoving] ; if moving, use interval for moving, else the other one
-    mov d, c ; d = ~c
-    not d
-    and c, MAP_UPDATE_INTERVAL_MOVING ; d = _isTargetMoving ? intervalMoving : interval
-    and d, MAP_UPDATE_INTERVAL
-    or d, c
+    mov d, a
+    call clockModulo ; y = clock % d
     
-    hwi HW_CLOCK ; time in b:c
-    mov y, b ; copy to y:a for modulo
-    mov a, c
-    div d ; clock % interval, remainder in y
-    
-    cmp y, 0 ; if remainder is 0, time to update
+    cmp y, 0 ; if modulo is 0, time to update
     jnz updateMapPeriodically_end
     
-    ; get map
-    mov a, LIDAR_GET_MAP
-    hwi HW_LIDAR
-    mov [didMapUpdateThisTick], TRUE
+    call updateMap
     
 updateMapPeriodically_end:
     ret
@@ -274,54 +291,46 @@ updateMapPeriodically_end:
 
 
 ;;  updateMapIfBatteryFull()
-;;  corrupt a,b,c
-
-; TODO change to isBatteryFull()
+;;  corrupt b
 
 updateMapIfBatteryFull:
-    mov a, BATTERY_GET_CHARGE
-    hwi HW_BATTERY
-    mov c, b
-    mov a, BATTERY_GET_CAPACITY
-    hwi HW_BATTERY
-    cmp c, b ; if not full, return
-    jl updateMapIfBatteryFull_end
+    call usedCharge
+    cmp b, 0 ; if battery not full, skip update
+    jnz updateMapIfBatteryFull_end
     
-    ; get map
-    mov a, LIDAR_GET_MAP
-    hwi HW_LIDAR
+    call updateMap
     
 updateMapIfBatteryFull_end:
     ret
 
 
 
-;;  updateTarget()
+;;  updateTargetStatus()
 ;;  in x,y: newTarget
 
 ; Sets _lastTargetX, _lastTargetY, _isTargetMoving.
 
-updateTarget:
+updateTargetStatus:
     ; only update if map has updated
     cmp [didMapUpdateThisTick], 0
-    jz updateTarget_end
+    jz updateTargetStatus_end
     
     ; has target moved?
     cmp [_lastTargetX], x
-    jnz updateTarget_moved
+    jnz updateTargetStatus_moved
     cmp [_lastTargetY], y
-    jnz updateTarget_moved
+    jnz updateTargetStatus_moved
     
     ; not moved
     mov [_isTargetMoving], FALSE
     ret
     
-updateTarget_moved:
+updateTargetStatus_moved:
     mov [_isTargetMoving], TRUE
     mov [_lastTargetX], x
     mov [_lastTargetY], y
     
-updateTarget_end:
+updateTargetStatus_end:
     ret
 
 
@@ -586,6 +595,29 @@ marquee:
 ;;                                                           Sensors
 ;;  ----------------------------------------------------------------
 
+;;  updateMap()
+
+; Copy map to memory at LIDAR_MAP_ADDR for 10 kJ.
+; Sets didMapUpdateThisTick.
+
+updateMap:
+    push a
+
+    ; get map
+    mov a, LIDAR_GET_MAP
+    hwi HW_LIDAR
+    mov [didMapUpdateThisTick], TRUE
+
+    pop a
+    ret
+
+
+testCostlyUpdateMap:
+    call updateMap
+    ret
+
+
+
 ;;  usedCharge()
 ;;  out b: capacity - charge
 
@@ -602,6 +634,41 @@ usedCharge:
 
     pop c
     pop a
+    ret
+
+
+
+;;  clockModulo()
+;;  in d: divisor
+;;  out y: result
+
+; Returns number of current tick, modulo divisor.
+
+clockModulo:
+    push a
+    push b
+    push c
+
+    hwi HW_CLOCK ; time in b:c
+    mov y, b ; copy b:c to y:a for modulo
+    mov a, c
+    div d ; clock % interval gives remainder in y
+
+    pop c
+    pop b
+    pop a
+    ret
+
+
+testClockModulo:
+    ; anything modulo 1 is 0
+    ; easier to test than actual modulo
+    mov d, 1
+
+    mov [expectD], d
+    mov [expectY], 0
+
+    call clockModulo
     ret
 
 
@@ -1103,6 +1170,50 @@ testCount_helper:
     mov [expectD], d
 
     call count
+    ret
+
+
+
+;;  ternaryOp
+;;  in a: TRUE or FALSE
+;;  in b: valueIfTrue
+;;  in c: valueIfFalse
+;;  out a: result
+;;  corrupt b,c
+
+; Pick one of two values based on boolean.
+; In other words: a = (a ? b : c)
+
+ternaryOp:
+    and b, a
+    not a
+    and a, c
+    or a, b
+    ret
+
+
+testTernaryOp1:
+    mov a, TRUE
+    mov b, 11
+    mov c, 22
+
+    mov [expectA], 11
+    or [expectCorruptRegs], REG_B
+    or [expectCorruptRegs], REG_C
+    
+    call ternaryOp
+    ret
+
+testTernaryOp2:
+    mov a, FALSE
+    mov b, 11
+    mov c, 22
+
+    mov [expectA], 22
+    or [expectCorruptRegs], REG_B
+    or [expectCorruptRegs], REG_C
+    
+    call ternaryOp
     ret
 
 
