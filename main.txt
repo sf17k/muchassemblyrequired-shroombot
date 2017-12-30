@@ -8,7 +8,7 @@ RUN_TESTS equ 1
 
 
 
-;;  Table of Contents [toc]
+;;  Table of Contents  #toc
 ; 0. START
 ; 1. BEHAVIOR
 ; 2. DRIVERS
@@ -129,20 +129,31 @@ entryPoint:
 runAllTests:
     call _preAllTests
     
-    ; --- ALL TESTS ---
+    ;;  vvv TESTS vvv  #tsts
 
-    mov [nextTest], count_test1
+    ;;  behavior
+
+    ;;  drivers
+
+    ;;  testing
+
+    ;;  math
+    mov [nextTest], testSeedRng
     call runTest
-    mov [nextTest], count_test2
+    mov [nextTest], testRandom
     call runTest
-    mov [nextTest], count_test3
+
+    ;;  types
+
+    ;;  utility
+    mov [nextTest], testCount1
     call runTest
-    mov [nextTest], seedRng_test
+    mov [nextTest], testCount2
     call runTest
-    mov [nextTest], random_test
+    mov [nextTest], testCount3
     call runTest
     
-    ; ^ ADD TESTS HERE ^
+    ;;  ^^^ END TESTS ^^^
 
     call _postAllTests
     brk
@@ -845,8 +856,8 @@ seedRng:
     pop b
     ret
 
-;;  TEST
-seedRng_test:
+
+testSeedRng:
     call seedRng
     ret
 
@@ -874,8 +885,8 @@ random:
     pop b
     ret
 
-;;  TEST
-random_test:
+
+testRandom:
     or [expectCorruptRegs], REG_A ; result is random, can't predict it
     call random
     ret
@@ -1063,14 +1074,29 @@ count_end:
     pop c
     ret
 
-;;  TEST
-dw 10 ; don't count before start
-count_test_data: dw 10,20,20,20,10
-dw 20 ; don't count after end
-count_test_helper:
-    mov c, count_test_data ; startAddr
-    mov d, count_test_data ; endAddr = startAddr + 5
-    add d, 5
+
+testCount1: ; 11 shows up 2 times
+    mov a, 11
+    mov [expectB], 2
+    jmp testCount_helper
+testCount2: ; 22 shows up 3 times
+    mov a, 22
+    mov [expectB], 3
+    jmp testCount_helper
+testCount3: ; 33 shows up 0 times
+    mov a, 33
+    mov [expectB], 0
+    jmp testCount_helper
+
+dw 11 ; don't count before start
+testCount_data:
+dw 11, 22, 22, 22, 11 ; length 5
+dw 22 ; don't count after end
+
+testCount_helper:
+    mov c, testCount_data ; startAddr
+    mov d, testCount_data ; endAddr = startAddr + length
+    add d, 5 ; length
     
     mov [expectA], a
     mov [expectC], c
@@ -1078,21 +1104,7 @@ count_test_helper:
 
     call count
     ret
-count_test1:
-    ; 10 shows up 2 times
-    mov a, 10
-    mov [expectB], 2
-    jmp count_test_helper
-count_test2:
-    ; 20 shows up 3 times
-    mov a, 20
-    mov [expectB], 3
-    jmp count_test_helper
-count_test3:
-    ; 30 shows up 0 times
-    mov a, 30
-    mov [expectB], 0
-    jmp count_test_helper
+
 
 
 
