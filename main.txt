@@ -217,7 +217,6 @@ displayDebugValues:
     sub a, sp
     
     call marquee
-    add sp, a ; pop values TODO
     
     pop bp
     ret
