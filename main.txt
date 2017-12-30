@@ -172,7 +172,7 @@ run:
     
     mov a, 0 ; distance, set to 0 to avoid battery usage (FIXME)
     call moveTo
-    mov [isStopped], FALSE ; reset
+    mov [_isStopped], FALSE ; reset
     
     ; if battery full, take a step
     call usedCharge ; in b
@@ -224,9 +224,9 @@ displayDebugValues:
 ;;  ********************************************************************
 
 didMapUpdateThisTick: dw FALSE
-lastTargetX: dw -1
-lastTargetY: dw -1
-isTargetMoving: dw FALSE
+_lastTargetX: dw -1
+_lastTargetY: dw -1
+_isTargetMoving: dw FALSE
 
 
 
@@ -237,10 +237,10 @@ updateMapPeriodically:
     mov [didMapUpdateThisTick], FALSE
     
     ; modulo clock for periodic updates
-    mov c, [isTargetMoving] ; if moving, use interval for moving, else the other one
+    mov c, [_isTargetMoving] ; if moving, use interval for moving, else the other one
     mov d, c ; d = ~c
     not d
-    and c, MAP_UPDATE_INTERVAL_MOVING ; d = isTargetMoving ? intervalMoving : interval
+    and c, MAP_UPDATE_INTERVAL_MOVING ; d = _isTargetMoving ? intervalMoving : interval
     and d, MAP_UPDATE_INTERVAL
     or d, c
     
@@ -288,7 +288,7 @@ updateMapIfBatteryFull_end:
 ;;  updateTarget()
 ;;  in x,y: newTarget
 
-; Sets lastTargetX, lastTargetY, isTargetMoving.
+; Sets _lastTargetX, _lastTargetY, _isTargetMoving.
 
 updateTarget:
     ; only update if map has updated
@@ -296,19 +296,19 @@ updateTarget:
     jz updateTarget_end
     
     ; has target moved?
-    cmp [lastTargetX], x
+    cmp [_lastTargetX], x
     jnz updateTarget_moved
-    cmp [lastTargetY], y
+    cmp [_lastTargetY], y
     jnz updateTarget_moved
     
     ; not moved
-    mov [isTargetMoving], FALSE
+    mov [_isTargetMoving], FALSE
     ret
     
 updateTarget_moved:
-    mov [isTargetMoving], TRUE
-    mov [lastTargetX], x
-    mov [lastTargetY], y
+    mov [_isTargetMoving], TRUE
+    mov [_lastTargetX], x
+    mov [_lastTargetY], y
     
 updateTarget_end:
     ret
@@ -321,7 +321,7 @@ updateTarget_end:
 ;;                                                          Movement
 ;;  ----------------------------------------------------------------
 
-isStopped: dw FALSE ; disable further commands?
+_isStopped: dw FALSE ; disable further commands?
 
 
 
@@ -332,13 +332,13 @@ isStopped: dw FALSE ; disable further commands?
 ; Manual command to take one step.
 
 stepOnce:
-    cmp [isStopped], TRUE ; if isStopped, exit
+    cmp [_isStopped], TRUE ; if _isStopped, exit
     jz stepOnce_end
     
     mov a, LEGS_WALK
     hwi HW_LEGS ; direction already in b
     
-    mov [isStopped], TRUE ; prevent walking again
+    mov [_isStopped], TRUE ; prevent walking again
     
 stepOnce_end:
     ret
@@ -355,7 +355,7 @@ stepOnce_end:
 stepN_stepsLeft: dw -1 ; -1 means no stepN command started yet
 
 stepN:
-    cmp [isStopped], TRUE ; if isStopped, exit
+    cmp [_isStopped], TRUE ; if _isStopped, exit
     jz stepN_end
     
     mov d, a ; numSteps
@@ -376,7 +376,7 @@ stepN_endif:
     ; halt if finished
     cmp [stepN_stepsLeft], 0
     jg stepN_end
-    mov [isStopped], TRUE
+    mov [_isStopped], TRUE
     
 stepN_end:
     ret
@@ -459,7 +459,7 @@ moveTo_pathPtr: dw -1 ; -1 means not started
 moveTo:
     push a ; distance
     
-    cmp [isStopped], TRUE ; if isStopped, exit
+    cmp [_isStopped], TRUE ; if _isStopped, exit
     jz moveTo_end
     
     ; initialize
@@ -518,7 +518,7 @@ moveTo_walkPath:
     
 moveTo_halt:
     ; halt
-    mov [isStopped], TRUE
+    mov [_isStopped], TRUE
     
 moveTo_end:
     add sp, 1 ; pop distance
@@ -602,8 +602,8 @@ usedCharge:
 ; The registers will be set to random values and checked for modification.
 
 ; Example assert usages:
-;   mov [testExpectedA], 0x1234
-;   or [testCorruptRegs], REG_A
+;   mov [expectA], 0x1234
+;   or [expectCorruptRegs], REG_A
 
 ; Example test run:
 ;   mov [nextTest], testMyStuff
@@ -615,36 +615,36 @@ usedCharge:
 nextTest: dw 0 ; addr
 
 ; which registers should we NOT check?
-testCorruptRegs: dw 0x0000 ; flags
-
-; which registers failed their checks?
-testFailedRegs: dw 0x0000 ; flags
-
-; helps identify which test failed
-testNumPassed: dw 0
+expectCorruptRegs: dw 0x0000 ; flags
 
 ; asserted values
-testExpectedA: dw 0
-testExpectedB: dw 0
-testExpectedC: dw 0
-testExpectedD: dw 0
-testExpectedX: dw 0
-testExpectedY: dw 0
-testExpectedBP: dw 0
-testExpectedSP: dw 0
+expectA: dw 0
+expectB: dw 0
+expectC: dw 0
+expectD: dw 0
+expectX: dw 0
+expectY: dw 0
+expectBP: dw 0
+expectSP: dw 0
+
+; which registers failed their checks?
+_checkFailedRegs: dw 0x0000 ; flags
 
 ; for error reporting
-testActualA: dw 0
-testActualB: dw 0
-testActualC: dw 0
-testActualD: dw 0
-testActualX: dw 0
-testActualY: dw 0
-testActualBP: dw 0
-testActualSP: dw 0
+_actualA: dw 0
+_actualB: dw 0
+_actualC: dw 0
+_actualD: dw 0
+_actualX: dw 0
+_actualY: dw 0
+_actualBP: dw 0
+_actualSP: dw 0
 
 ; set to prevent running tests more than once
 _testsPerformed: dw FALSE
+
+; helps identify which test failed
+_numTestsPassed: dw 0
 
 
 
@@ -673,19 +673,19 @@ _postAllTests:
 
 _showTestResults:
     ; if all passed, show success
-    cmp [testFailedRegs], 0x0000
+    cmp [_checkFailedRegs], 0x0000
     jz _showTestResults_success
     
     ; show failure
     push 0xDEAD ; marker
-    push [testNumPassed]
-    push [testFailedRegs]
-    push [testActualA]
-    push [testActualB]
-    push [testActualC]
-    push [testActualD]
-    push [testActualX]
-    push [testActualY]
+    push [_numTestsPassed]
+    push [_checkFailedRegs]
+    push [_actualA]
+    push [_actualB]
+    push [_actualC]
+    push [_actualD]
+    push [_actualX]
+    push [_actualY]
     mov a, 9 ; numValues
     call marquee
     
@@ -694,7 +694,7 @@ _showTestResults:
 _showTestResults_success:
     ; show success
     push 0xF00D ; marker
-    push [testNumPassed]
+    push [_numTestsPassed]
     mov a, 2 ; numValues
     call marquee
     
@@ -718,103 +718,103 @@ runTest:
 
 
 _preTest:
-    mov [testCorruptRegs], 0x0000
+    mov [expectCorruptRegs], 0x0000
 
     ; initialize registers with random numbers (except bp, sp)
     call random
-    mov [testExpectedA], a
+    mov [expectA], a
     call random
-    mov [testExpectedB], a
+    mov [expectB], a
     call random
-    mov [testExpectedC], a
+    mov [expectC], a
     call random
-    mov [testExpectedD], a
+    mov [expectD], a
     call random
-    mov [testExpectedX], a
+    mov [expectX], a
     call random
-    mov [testExpectedY], a
-    mov [testExpectedBP], bp
-    mov [testExpectedSP], sp ; sp last
+    mov [expectY], a
+    mov [expectBP], bp
+    mov [expectSP], sp ; sp last
 
-    mov a, [testExpectedA]
-    mov b, [testExpectedB]
-    mov c, [testExpectedC]
-    mov d, [testExpectedD]
-    mov x, [testExpectedX]
-    mov y, [testExpectedY]
+    mov a, [expectA]
+    mov b, [expectB]
+    mov c, [expectC]
+    mov d, [expectD]
+    mov x, [expectX]
+    mov y, [expectY]
 
     ret
 
 
 _postTest:
     ; save all registers
-    mov [testActualA], a
-    mov [testActualB], b
-    mov [testActualC], c
-    mov [testActualD], d
-    mov [testActualX], x
-    mov [testActualY], y
-    mov [testActualBP], bp
-    mov [testActualSP], sp
+    mov [_actualA], a
+    mov [_actualB], b
+    mov [_actualC], c
+    mov [_actualD], d
+    mov [_actualX], x
+    mov [_actualY], y
+    mov [_actualBP], bp
+    mov [_actualSP], sp
 
     ; check that registers match expected values
 
-    mov [testFailedRegs], 0x0000 ; clear errors
-    mov c, [testCorruptRegs]
+    mov [_checkFailedRegs], 0x0000 ; clear errors
+    mov c, [expectCorruptRegs]
 
     ; check register A
     test c, REG_A ; if expected corrupt, pass
     jnz _postTest_endA
-    cmp [testActualA], [testExpectedA] ; if actual == expected, pass
+    cmp [_actualA], [expectA] ; if actual == expected, pass
     jz _postTest_endA
-    or [testFailedRegs], REG_A ; fail
+    or [_checkFailedRegs], REG_A ; fail
 _postTest_endA:
     ; check register B...
     test c, REG_B
     jnz _postTest_endB
-    cmp [testActualB], [testExpectedB]
+    cmp [_actualB], [expectB]
     jz _postTest_endB
-    or [testFailedRegs], REG_B
+    or [_checkFailedRegs], REG_B
 _postTest_endB:
     test c, REG_C
     jnz _postTest_endC
-    cmp [testActualC], [testExpectedC]
+    cmp [_actualC], [expectC]
     jz _postTest_endC
-    or [testFailedRegs], REG_C
+    or [_checkFailedRegs], REG_C
 _postTest_endC:
     test c, REG_D
     jnz _postTest_endD
-    cmp [testActualD], [testExpectedD]
+    cmp [_actualD], [expectD]
     jz _postTest_endD
-    or [testFailedRegs], REG_D
+    or [_checkFailedRegs], REG_D
 _postTest_endD:
     test c, REG_X
     jnz _postTest_endX
-    cmp [testActualX], [testExpectedX]
+    cmp [_actualX], [expectX]
     jz _postTest_endX
-    or [testFailedRegs], REG_X
+    or [_checkFailedRegs], REG_X
 _postTest_endX:
     test c, REG_Y
     jnz _postTest_endY
-    cmp [testActualY], [testExpectedY]
+    cmp [_actualY], [expectY]
     jz _postTest_endY
-    or [testFailedRegs], REG_Y
+    or [_checkFailedRegs], REG_Y
 _postTest_endY:
     test c, REG_BP
     jnz _postTest_endBP
-    cmp [testActualBP], [testExpectedBP]
+    cmp [_actualBP], [expectBP]
     jz _postTest_endBP
-    or [testFailedRegs], REG_BP
+    or [_checkFailedRegs], REG_BP
 _postTest_endBP:
     test c, REG_SP
     jnz _postTest_endSP
-    cmp [testActualSP], [testExpectedSP]
+    cmp [_actualSP], [expectSP]
     jz _postTest_endSP
-    or [testFailedRegs], REG_SP
+    or [_checkFailedRegs], REG_SP
 _postTest_endSP:
 
     ; if all passed, move on
-    cmp [testFailedRegs], 0x0000
+    cmp [_checkFailedRegs], 0x0000
     jz _postTest_end
 
     ; else show error and halt
@@ -822,7 +822,7 @@ _postTest_endSP:
     brk ; halt
 
 _postTest_end:
-    add [testNumPassed], 1 ; won't reach this if failed
+    add [_numTestsPassed], 1 ; won't reach this if failed
     ret
 
 
@@ -876,7 +876,7 @@ random:
 
 ;;  TEST
 random_test:
-    or [testCorruptRegs], REG_A ; result is random, can't predict it
+    or [expectCorruptRegs], REG_A ; result is random, can't predict it
     call random
     ret
 
@@ -1072,26 +1072,26 @@ count_test_helper:
     mov d, count_test_data ; endAddr = startAddr + 5
     add d, 5
     
-    mov [testExpectedA], a
-    mov [testExpectedC], c
-    mov [testExpectedD], d
+    mov [expectA], a
+    mov [expectC], c
+    mov [expectD], d
 
     call count
     ret
 count_test1:
     ; 10 shows up 2 times
     mov a, 10
-    mov [testExpectedB], 2
+    mov [expectB], 2
     jmp count_test_helper
 count_test2:
     ; 20 shows up 3 times
     mov a, 20
-    mov [testExpectedB], 3
+    mov [expectB], 3
     jmp count_test_helper
 count_test3:
     ; 30 shows up 0 times
     mov a, 30
-    mov [testExpectedB], 0
+    mov [expectB], 0
     jmp count_test_helper
 
 
